@@ -20,16 +20,15 @@ jobs:
       - name: ⬇️ Download RustDesk (Latest macOS Intel DMG)
         shell: bash
         run: |
-          RUSTDESK_URL="https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"  # Update if newer version available
-          echo "Downloading RustDesk from: $RUSTDESK_URL"
+          # Use latest stable release as of Nov 2025 - update if needed from https://github.com/rustdesk/rustdesk/releases
+          RUSTDESK_URL="https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"
+          echo "Downloading from: $RUSTDESK_URL"
           curl -fL -o rustdesk.dmg "$RUSTDESK_URL"
-
-          # Validate
           if [ ! -s rustdesk.dmg ]; then
             echo "::error::Download failed"
             exit 1
           fi
-          echo "✅ Download successful"
+          echo "✅ Downloaded"
 
       - name: 📦 Install RustDesk from DMG
         shell: bash
@@ -37,81 +36,84 @@ jobs:
           hdiutil attach rustdesk.dmg -mountpoint /Volumes/RustDesk
           cp -R /Volumes/RustDesk/RustDesk.app /Applications/
           hdiutil detach /Volumes/RustDesk
-          echo "✅ RustDesk installed to /Applications"
+          echo "✅ Installed to /Applications"
 
-      - name: ⚙️ Configure Unattended Access
+      - name: ⚙️ Configure Config File for Unattended Access
         shell: bash
         env:
           PASSWORD: ${{ inputs.device_password }}
         run: |
-          AGENT_PATH="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
+          CONFIG_DIR="$HOME/Library/Preferences"
+          CONFIG_FILE="$CONFIG_DIR/RustDesk2.toml"
+          
+          mkdir -p "$CONFIG_DIR"
+          touch "$CONFIG_FILE"
+          
+          # Set plain password (app will hash on start) and access mode to accept permanent
+          echo "password = '$PASSWORD'" >> "$CONFIG_FILE"
+          echo "access_mode = 'use-both-passwords'" >> "$CONFIG_FILE"
+          
+          echo "✅ Config file created at $CONFIG_FILE with password and access mode set"
 
-          # Set permanent password for unattended access
-          "$AGENT_PATH" --password "$PASSWORD"
-
-          # Get the ID
-          ID=$("$AGENT_PATH" --get-id)
-          echo "RustDesk ID: $ID"
-
-          echo "✅ Configured with password: $PASSWORD"
-
-      - name: 🚀 Launch RustDesk and Verify
+      - name: 🚀 Launch RustDesk and Verify (Hashes Password)
         shell: bash
         run: |
           AGENT_PATH="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
-
-          # Launch in background
+          
+          # Launch to hash the password and apply config
           "$AGENT_PATH" &
-          sleep 10
-
+          sleep 15  # Give time to load and hash
+          
+          # Get ID
+          ID=$("$AGENT_PATH" --get-id)
+          echo "RustDesk ID: $ID"
+          
           # Verify running
           if pgrep -f "rustdesk" > /dev/null; then
-            echo "✅ RustDesk running (PID: $(pgrep -f rustdesk))"
+            echo "✅ Running (PID: $(pgrep -f rustdesk))"
           else
-            echo "::error::Failed to start RustDesk"
+            echo "::error::Failed to start"
             exit 1
           fi
 
       - name: 🛡️ Open Permissions Settings (Approve on Connect)
         shell: bash
         run: |
-          # Open System Settings for approvals (you'll approve during remote session)
           open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
           open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-          echo "✅ Permissions panes opened - approve when you connect remotely"
+          echo "✅ Permissions opened - approve remotely on first connect"
 
       - name: 🎉 Connect Now & Keep Alive
         shell: bash
         env:
           PASSWORD: ${{ inputs.device_password }}
         run: |
-          ID=$("/Applications/RustDesk.app/Contents/MacOS/rustdesk" --get-id)
-
+          AGENT_PATH="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
+          ID=$("$AGENT_PATH" --get-id)
+          
           echo "----------------------------------------------------------------"
-          echo "RustDesk is running! Connect now:"
-          echo "1. Download RustDesk client: https://rustdesk.com/"
-          echo "2. Enter ID: $ID"
-          echo "3. Enter Password: $PASSWORD"
-          echo "4. Connect and approve permissions in the opened settings."
-          echo "⚠️ Runner active for 6 hours."
+          echo "RustDesk running! Connect now:"
+          echo "1. Download client: https://rustdesk.com/"
+          echo "2. ID: $ID"
+          echo "3. Password: $PASSWORD"
+          echo "4. Connect and approve permissions."
+          echo "⚠️ Active for 6 hours."
           echo "----------------------------------------------------------------"
-
-          # Keep alive loop with monitoring
+          
           MINUTES=0
           while [ $MINUTES -lt 360 ]; do
             sleep 60
             MINUTES=$((MINUTES + 1))
             if [ $((MINUTES % 30)) -eq 0 ]; then
               echo "⏰ Active: ${MINUTES} minutes ($(date))"
-              # Restart if crashed
               if ! pgrep -f "rustdesk" > /dev/null; then
-                echo "::warning::RustDesk stopped - restarting"
-                /Applications/RustDesk.app/Contents/MacOS/rustdesk &
+                echo "::warning::Stopped - restarting"
+                "$AGENT_PATH" &
                 sleep 5
               fi
             fi
           done
-          echo "⏰ Timeout reached"
+          echo "⏰ Timeout"
 
       - name: 🧹 Cleanup on Failure
         if: failure()
