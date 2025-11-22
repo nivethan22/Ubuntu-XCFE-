@@ -20,7 +20,7 @@ jobs:
       - name: ⬇️ Download RustDesk (Latest macOS Intel DMG)
         shell: bash
         run: |
-          # Use latest stable release as of Nov 2025 - update if needed from https://github.com/rustdesk/rustdesk/releases
+          # Latest stable as of Nov 2025 - check https://github.com/rustdesk/rustdesk/releases for updates
           RUSTDESK_URL="https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"
           echo "Downloading from: $RUSTDESK_URL"
           curl -fL -o rustdesk.dmg "$RUSTDESK_URL"
@@ -43,26 +43,31 @@ jobs:
         env:
           PASSWORD: ${{ inputs.device_password }}
         run: |
-          CONFIG_DIR="$HOME/Library/Preferences"
-          CONFIG_FILE="$CONFIG_DIR/RustDesk2.toml"
+          CONFIG_DIR="/Library/Preferences/com.carriez.RustDesk"
+          CONFIG_FILE="$CONFIG_DIR/RustDesk.toml"
           
-          mkdir -p "$CONFIG_DIR"
-          touch "$CONFIG_FILE"
+          sudo mkdir -p "$CONFIG_DIR"
+          sudo touch "$CONFIG_FILE"
           
-          # Set plain password (app will hash on start) and access mode to accept permanent
-          echo "password = '$PASSWORD'" >> "$CONFIG_FILE"
-          echo "access_mode = 'use-both-passwords'" >> "$CONFIG_FILE"
+          # Set plain password (app hashes on start)
+          echo "password = '$PASSWORD'" | sudo tee -a "$CONFIG_FILE"
           
-          echo "✅ Config file created at $CONFIG_FILE with password and access mode set"
+          echo "✅ Config file created at $CONFIG_FILE with password set"
 
       - name: 🚀 Launch RustDesk and Verify (Hashes Password)
         shell: bash
         run: |
           AGENT_PATH="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
           
-          # Launch to hash the password and apply config
+          # Launch to apply config and hash password
           "$AGENT_PATH" &
-          sleep 15  # Give time to load and hash
+          sleep 15
+          
+          # Restart to ensure config applies
+          pkill -f rustdesk || true
+          sleep 5
+          "$AGENT_PATH" &
+          sleep 10
           
           # Get ID
           ID=$("$AGENT_PATH" --get-id)
