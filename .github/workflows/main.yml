@@ -29,9 +29,20 @@ jobs:
         shell: bash
         run: |
           # Download the macOS Agent application bundle
-          # The agent is a standard .app bundle packaged in a ZIP
           GETSCREEN_URL="https://getscreen.me/download/macos-agent"
-          curl -o getscreen.zip $GETSCREEN_URL
+          
+          echo "Attempting to download agent from: $GETSCREEN_URL"
+          # Added -f (fail silently on server errors) and -L (follow redirects) 
+          # to ensure the download link works correctly.
+          curl -fL -o getscreen.zip $GETSCREEN_URL
+          
+          # Check if the download was successful before attempting to unzip
+          if [ ! -s getscreen.zip ]; then
+            echo "::error::Download failed. 'getscreen.zip' is missing or empty."
+            exit 1
+          fi
+          
+          echo "Download successful. Unzipping agent..."
           unzip getscreen.zip
           
       - name: ⚙️ Configure and Register Getscreen.me Agent
@@ -45,7 +56,6 @@ jobs:
           # Move the unzipped application to the standard Applications directory
           mv Getscreen.app /Applications/
           
-          # The agent application file itself is the executable
           # 1. Register the agent with the user's email
           # 2. Configure the device name and enable control/file transfer
           $AGENT_PATH -register $MY_EMAIL
@@ -60,9 +70,7 @@ jobs:
         run: |
           AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
           
-          # Launch the agent service
-          # NOTE: On macOS runners, the agent may be installed as a daemon/service by default.
-          # We run it here to ensure it's active.
+          # Launch the agent service in the background
           $AGENT_PATH -start &
           
           echo "----------------------------------------------------------------"
