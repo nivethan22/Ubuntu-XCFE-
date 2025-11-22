@@ -1,64 +1,79 @@
-name: Setup XFCE with VNC Remote Access
+name: macOS Intel - Getscreen.me Runner
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-
+  workflow_dispatch:
+    inputs:
+      getscreen_email:
+        description: 'Your Getscreen.me Account Email (for registration)'
+        required: true
+      device_name:
+        description: 'Remote Device Name (e.g., Mac-Cloud-Runner)'
+        required: true
+        default: 'Mac-Cloud-Runner'
+    
 jobs:
-  setup:
-    runs-on: ubuntu-latest
+  run-mac-remote-desktop:
+    # Use macos-13 for a recent Intel-based Mac runner. 
+    # NOTE: macos-latest is now M-series (Apple Silicon).
+    runs-on: macos-13
+    
+    timeout-minutes: 360 # 6 hours maximum run time
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Update and install dependencies
-      run: |
-        sudo apt update && sudo apt upgrade -y
-        sudo apt install -y \
-          xfce4 \
-          xfce4-goodies \
-          xorg \
-          wget \
-          curl \
-          gnupg2 \
-          lsb-release \
-          sudo \
-          xfce4-session \
-          pulseaudio \
-          dbus-x11 \
-          xrdp \
-          tightvncserver  # Install VNC server
+      # --- SETUP: GETSCREEN.ME INSTALLATION ---
+      
+      - name: ⬇️ Download Getscreen.me Agent
+        shell: bash
+        run: |
+          # Download the macOS Agent application bundle
+          # The agent is a standard .app bundle packaged in a ZIP
+          GETSCREEN_URL="https://getscreen.me/download/macos-agent"
+          curl -o getscreen.zip $GETSCREEN_URL
+          unzip getscreen.zip
+          
+      - name: ⚙️ Configure and Register Getscreen.me Agent
+        shell: bash
+        env:
+          MY_EMAIL: ${{ github.event.inputs.getscreen_email }}
+          MY_NAME: ${{ github.event.inputs.device_name }}
+        run: |
+          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
+          
+          # Move the unzipped application to the standard Applications directory
+          mv Getscreen.app /Applications/
+          
+          # The agent application file itself is the executable
+          # 1. Register the agent with the user's email
+          # 2. Configure the device name and enable control/file transfer
+          $AGENT_PATH -register $MY_EMAIL
+          $AGENT_PATH -config "name='$MY_NAME' control=true fast_access=true file_transfer=true"
+          
+          echo "Getscreen.me registered and configured."
 
-    - name: Set up VNC Server with XFCE
-      run: |
-        # Create a password for the VNC server
-        mkdir -p /home/runner/.vnc
-        echo "yourpassword" | vncpasswd -f > /home/runner/.vnc/passwd
-        chmod 600 /home/runner/.vnc/passwd
-        
-        # Start the VNC server
-        vncserver :1 -geometry 1280x1024 -depth 24
-        
-        # Set up XFCE session for VNC
-        echo "xfce4-session" > /home/runner/.vnc/xstartup
-        chmod +x /home/runner/.vnc/xstartup
+      # --- FINAL STEP: LAUNCH AND KEEP ALIVE ---
+      
+      - name: 🚀 Launch Getscreen.me and Keep Runner Alive
+        shell: bash
+        run: |
+          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
+          
+          # Launch the agent service
+          # NOTE: On macOS runners, the agent may be installed as a daemon/service by default.
+          # We run it here to ensure it's active.
+          $AGENT_PATH -start &
+          
+          echo "----------------------------------------------------------------"
+          echo "🎉 GETSCREEN.ME AGENT IS RUNNING. CONNECT NOW!"
+          echo "1. Go to your Getscreen.me dashboard: https://my.getscreen.me/"
+          echo "2. Find the device named '${{ github.event.inputs.device_name }}' (or similar)."
+          echo "3. Initiate the remote connection."
+          echo "----------------------------------------------------------------"
 
-        # Restart VNC server to load the new session
-        vncserver -kill :1
-        vncserver :1 -geometry 1280x1024 -depth 24
-
-    - name: VNC Authentication (Manual Step)
-      run: |
-        echo "Now, follow these steps to authenticate with VNC:"
-        echo "1. Open a VNC client on your local machine."
-        echo "2. Connect to the following address: {runner_ip}:1"
-        echo "3. Use the password 'yourpassword' to authenticate."
-        
-    - name: Final Message
-      run: |
-        echo "VNC setup complete. You can now access your VM via VNC using a VNC client."
+          # Keep the runner alive for the duration of the timeout
+          # We use a simple loop, as closing the shell kills the process.
+          while true; do
+            sleep 60
+          done
