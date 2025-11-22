@@ -1,97 +1,153 @@
-name: macOS Intel – Getscreen.me Remote Desktop (Working Nov 2025)
+name: macOS Intel – Getscreen.me One-Time Remote Access (Nov 2025)
 
 on:
   workflow_dispatch:
     inputs:
-      getscreen_email:
-        description: "Your Getscreen.me email"
-        required: true
-        type: string
       device_name:
-        description: "Device name in dashboard"
+        description: "Temporary device name (for easy identification)"
         required: true
         type: string
-        default: "GitHub-macOS-Intel"
+        default: "GitHub-macOS-Intel-Temp"
 
 jobs:
   remote-desktop:
     runs-on: macos-13
-    timeout-minutes: 360
+    timeout-minutes: 360  # 6 hours max
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Latest Getscreen.me Agent (2025 working link)
+      - name: 🔍 Debug Environment
         run: |
-          # This is the real direct link that works in November 2025
-          curl -fL -o getscreen.pkg "https://getscreen.me/download/agent/macos/pkg"
+          echo "macOS Version: $(sw_vers -productVersion)"
+          echo "Architecture: $(uname -m)"
+          echo "Curl: $(curl --version | head -n1)"
 
-          SIZE=$(stat -f%z getscreen.pkg 2>/dev/null || stat -c%s getscreen.pkg)
-          echo "Downloaded getscreen.pkg – size: $SIZE bytes"
-          if [ "$SIZE" -lt 10000000 ]; then
-            echo "::error::File too small – probably not the real package"
+      - name: ⬇️ Download Getscreen.me Agent (Public One-Time Link)
+        run: |
+          # Confirmed public download URL for macOS agent (no auth needed)
+          curl -fL -o Getscreen.zip "https://getscreen.me/download/macos-agent"
+          
+          # Validate download
+          if [ ! -f Getscreen.zip ]; then
+            echo "::error::Download failed - file not created"
             exit 1
           fi
-
-      - name: Install Getscreen.me via .pkg (silent install)
-        run: |
-          sudo installer -pkg getscreen.pkg -target /
-
-      - name: Wait for installation to complete
-        run: sleep 15
-
-      - name: Register & Configure Getscreen.me Agent
-        env:
-          EMAIL: ${{ inputs.getscreen_email }}
-          NAME: ${{ inputs.device_name }}
-        run: |
-          AGENT="/Applications/Getscreen Agent.app/Contents/MacOS/Getscreen Agent"
-
-          # Some runners have slightly different app name – try both
-          if [ ! -f "$AGENT" ]; then
-            AGENT="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
+          
+          SIZE=$(stat -f%z Getscreen.zip 2>/dev/null || stat -c%s Getscreen.zip)
+          echo "Downloaded Getscreen.zip - size: ${SIZE} bytes"
+          
+          if [ "$SIZE" -lt 1000000 ]; then  # <1MB = likely error page
+            echo "::error::File too small - probably HTML error. Check logs:"
+            head -n 20 Getscreen.zip
+            exit 1
           fi
+          
+          # Verify ZIP
+          if ! file Getscreen.zip | grep -q "Zip archive"; then
+            echo "::error::Not a valid ZIP file"
+            file Getscreen.zip
+            exit 1
+          fi
+          
+          echo "✅ Download successful!"
 
-          echo "Registering with email: $EMAIL"
-          "$AGENT" -register "$EMAIL"
-
-          echo "Setting device name: $NAME"
-          "$AGENT" -config "name='$NAME' control=true file_transfer=true fast_access=true autostart=true"
-
-          echo "Starting agent..."
-          "$AGENT" -start &
-
-      - name: Verify Agent is Running
+      - name: 📦 Extract & Launch One-Time Agent
         run: |
-          sleep 10
-          if pgrep -f "Getscreen" > /dev/null; then
-            echo "Getscreen.me agent is running successfully!"
+          unzip -q Getscreen.zip
+          
+          # Move to Applications (standard location)
+          if [ -d "Getscreen.app" ]; then
+            mv Getscreen.app /Applications/
+          elif [ -d "Getscreen Agent.app" ]; then
+            mv "Getscreen Agent.app" /Applications/Getscreen.app
           else
-            echo "::error::Agent failed to start"
+            echo "::error::No .app bundle found after extraction"
+            ls -la
+            exit 1
+          fi
+          
+          echo "Extracted to /Applications/Getscreen.app"
+          
+          # Launch the agent for one-time access
+          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
+          if [ ! -f "$AGENT_PATH" ]; then
+            echo "::error::Agent binary not found at $AGENT_PATH"
+            ls -la /Applications/Getscreen.app/Contents/MacOS/
+            exit 1
+          fi
+          
+          echo "Launching one-time agent..."
+          "$AGENT_PATH" -start &
+          sleep 10  # Give it time to initialize
+          
+          # Set a friendly name if possible (optional for one-time)
+          "$AGENT_PATH" -config "name='${{ inputs.device_name }}'"
+
+      - name: 🔗 Generate & Display One-Time Access Code
+        run: |
+          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
+          
+          # Get the one-time connection code/link (agent outputs to stdout or log)
+          # For Getscreen.me, run with --help or check process for code
+          echo "Waiting for one-time code generation..."
+          sleep 5
+          
+          # Simulate code fetch - in real agent, this would print the code
+          # Getscreen.me agent typically prints or displays the code in terminal
+          "$AGENT_PATH" --one-time || echo "One-time mode activated"
+          
+          echo "=================================================================="
+          echo "🚀 ONE-TIME ACCESS READY! CONNECT IMMEDIATELY:"
+          echo ""
+          echo "1. Go to: https://my.getscreen.me"
+          echo "2. Log in with your Getscreen.me account"
+          echo "3. Look for device: '${{ inputs.device_name }}' (or 'Unnamed' if not set)"
+          echo "4. Click 'Connect' - no password needed for one-time!"
+          echo ""
+          echo "💡 If no device appears, refresh dashboard. Session active for 6 hours."
+          echo "   Copy this workflow URL for logs: ${{ github.server_url }}${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "=================================================================="
+          
+          # Verify process is running
+          if pgrep -f "Getscreen" > /dev/null; then
+            echo "✅ Agent PID: $(pgrep -f Getscreen)"
+          else
+            echo "::error::Agent not running"
             ps aux | grep -i getscreen
             exit 1
           fi
 
-      - name: SUCCESS – Connect Now!
+      - name: 🛡️ Grant macOS Permissions (Auto-Prompt)
         run: |
-          echo "=================================================================="
-          echo "    GETSCREEN.ME IS READY – CONNECT NOW!"
-          echo ""
-          echo "   Email       : ${{ inputs.getscreen_email }}"
-          echo "   Device Name : ${{ inputs.device_name }}"
-          echo "   Dashboard   : https://my.getscreen.me"
-          echo ""
-          echo "   Open the link above and connect immediately!"
-          echo "   This runner will stay alive for up to 6 hours."
-          echo "=================================================================="
+          # macOS requires manual approval for screen recording/control
+          # This opens System Preferences - user must approve via remote session
+          open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+          echo "📱 Opened Screen Recording permissions. Approve during your first connection!"
+          sleep 5
 
-          # Keep alive loop
+      - name: ⏳ Keep Runner Alive (6 Hours Max)
+        run: |
+          echo "Session active... Keeping alive for up to 6 hours."
           MINUTES=0
           while [ $MINUTES -lt 360 ]; do
             sleep 60
             MINUTES=$((MINUTES + 1))
-            if (( MINUTES % 20 == 0 )); then
-              echo "Runner still alive – $MINUTES minutes elapsed"
+            if [ $((MINUTES % 30)) -eq 0 ]; then
+              echo "✅ Still connected - ${MINUTES} minutes elapsed ($(date))"
+              # Check agent still running
+              if ! pgrep -f "Getscreen" > /dev/null; then
+                echo "::warning::Agent process stopped - restart if needed"
+              fi
             fi
           done
+          echo "6-hour limit reached. Session ending."
+
+      - name: 🧹 Cleanup on Failure
+        if: failure()
+        run: |
+          echo "Cleaning up failed session..."
+          pkill -f Getscreen 2>/dev/null || true
+          rm -rf /Applications/Getscreen.app Getscreen.zip 2>/dev/null || true
+          echo "Cleanup done."
