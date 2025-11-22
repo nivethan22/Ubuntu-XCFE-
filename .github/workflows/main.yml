@@ -1,109 +1,122 @@
-name: macOS Intel – Getscreen.me Remote Desktop (Nov 2025)
+name: macOS Intel - RustDesk Remote Desktop Runner
 
 on:
   workflow_dispatch:
     inputs:
-      getscreen_email:
-        description: "Your Getscreen.me email for registration"
+      device_password:
+        description: 'Permanent password for unattended access (choose a strong one)'
         required: true
-        type: string
-      device_name:
-        description: "Device name in dashboard"
-        required: true
-        type: string
-        default: "Mac-Intel-Runner"
+        default: 'securepassword123'
 
 jobs:
-  remote-desktop:
+  run-mac-remote-desktop:
     runs-on: macos-13
-    timeout-minutes: 360
+    timeout-minutes: 360 # 6 hours max
 
     steps:
-      - name: Checkout repository (with agent ZIP)
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate & Extract Agent ZIP
+      - name: ⬇️ Download RustDesk (Latest macOS Intel DMG)
+        shell: bash
         run: |
-          ZIP_FILE="getscreen-macos.zip"  # Download manually from dashboard and commit this file
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "::error::Missing $ZIP_FILE! Download macOS agent ZIP from https://my.getscreen.me > Add Device > macOS, rename to $ZIP_FILE, commit to repo root."
-            exit 1
-          fi
-          
-          echo "Extracting $ZIP_FILE..."
-          unzip -q "$ZIP_FILE"
-          
-          if [ -d "Getscreen.app" ]; then
-            mv Getscreen.app /Applications/
-          elif [ -d "Getscreen Agent.app" ]; then
-            mv "Getscreen Agent.app" /Applications/Getscreen.app
-          else
-            echo "::error::No .app bundle found."
-            ls -la
-            exit 1
-          fi
-          
-          echo "✅ Agent installed to /Applications/Getscreen.app"
+          RUSTDESK_URL="https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"  # Update if newer version available
+          echo "Downloading RustDesk from: $RUSTDESK_URL"
+          curl -fL -o rustdesk.dmg "$RUSTDESK_URL"
 
-      - name: Register & Configure Agent
+          # Validate
+          if [ ! -s rustdesk.dmg ]; then
+            echo "::error::Download failed"
+            exit 1
+          fi
+          echo "✅ Download successful"
+
+      - name: 📦 Install RustDesk from DMG
+        shell: bash
+        run: |
+          hdiutil attach rustdesk.dmg -mountpoint /Volumes/RustDesk
+          cp -R /Volumes/RustDesk/RustDesk.app /Applications/
+          hdiutil detach /Volumes/RustDesk
+          echo "✅ RustDesk installed to /Applications"
+
+      - name: ⚙️ Configure Unattended Access
+        shell: bash
         env:
-          EMAIL: ${{ inputs.getscreen_email }}
-          NAME: ${{ inputs.device_name }}
+          PASSWORD: ${{ inputs.device_password }}
         run: |
-          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
-          
-          if [ ! -f "$AGENT_PATH" ]; then
-            AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen Agent"
-          fi
-          
-          echo "Registering with $EMAIL"
-          "$AGENT_PATH" -register "$EMAIL"
-          
-          echo "Configuring device: $NAME"
-          "$AGENT_PATH" -config "name='$NAME' control=true file_transfer=true fast_access=true"
-          
-          echo "✅ Configured"
+          AGENT_PATH="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
 
-      - name: Launch & Verify Agent
+          # Set permanent password for unattended access
+          "$AGENT_PATH" --password "$PASSWORD"
+
+          # Get the ID
+          ID=$("$AGENT_PATH" --get-id)
+          echo "RustDesk ID: $ID"
+
+          echo "✅ Configured with password: $PASSWORD"
+
+      - name: 🚀 Launch RustDesk and Verify
+        shell: bash
         run: |
-          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
-          
-          if [ ! -f "$AGENT_PATH" ]; then
-            AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen Agent"
-          fi
-          
-          "$AGENT_PATH" -start &
+          AGENT_PATH="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
+
+          # Launch in background
+          "$AGENT_PATH" &
           sleep 10
-          
-          if pgrep -f "Getscreen" > /dev/null; then
-            echo "✅ Agent running (PID: $(pgrep -f Getscreen))"
+
+          # Verify running
+          if pgrep -f "rustdesk" > /dev/null; then
+            echo "✅ RustDesk running (PID: $(pgrep -f rustdesk))"
           else
-            echo "::error::Agent failed to start"
+            echo "::error::Failed to start RustDesk"
             exit 1
           fi
 
-      - name: Success Message & Keep Alive
+      - name: 🛡️ Open Permissions Settings (Approve on Connect)
+        shell: bash
         run: |
-          echo "=================================================================="
-          echo "🎉 GETSCREEN.ME READY! CONNECT NOW"
-          echo "Email: ${{ inputs.getscreen_email }}"
-          echo "Device: ${{ inputs.device_name }}"
-          echo "Dashboard: https://my.getscreen.me"
-          echo "Runner active for 6 hours."
-          echo "=================================================================="
-          
+          # Open System Settings for approvals (you'll approve during remote session)
+          open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+          open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+          echo "✅ Permissions panes opened - approve when you connect remotely"
+
+      - name: 🎉 Connect Now & Keep Alive
+        shell: bash
+        env:
+          PASSWORD: ${{ inputs.device_password }}
+        run: |
+          ID=$("/Applications/RustDesk.app/Contents/MacOS/rustdesk" --get-id)
+
+          echo "----------------------------------------------------------------"
+          echo "RustDesk is running! Connect now:"
+          echo "1. Download RustDesk client: https://rustdesk.com/"
+          echo "2. Enter ID: $ID"
+          echo "3. Enter Password: $PASSWORD"
+          echo "4. Connect and approve permissions in the opened settings."
+          echo "⚠️ Runner active for 6 hours."
+          echo "----------------------------------------------------------------"
+
+          # Keep alive loop with monitoring
           MINUTES=0
           while [ $MINUTES -lt 360 ]; do
             sleep 60
             MINUTES=$((MINUTES + 1))
-            if (( MINUTES % 30 == 0 )); then
-              echo "Active: $MINUTES min"
+            if [ $((MINUTES % 30)) -eq 0 ]; then
+              echo "⏰ Active: ${MINUTES} minutes ($(date))"
+              # Restart if crashed
+              if ! pgrep -f "rustdesk" > /dev/null; then
+                echo "::warning::RustDesk stopped - restarting"
+                /Applications/RustDesk.app/Contents/MacOS/rustdesk &
+                sleep 5
+              fi
             fi
           done
+          echo "⏰ Timeout reached"
 
-      - name: Cleanup on Failure
+      - name: 🧹 Cleanup on Failure
         if: failure()
+        shell: bash
         run: |
-          pkill -f Getscreen || true
-          rm -rf /Applications/Getscreen.app getscreen-macos.zip
-          echo "Cleanup done"
+          pkill -f rustdesk || true
+          rm -rf /Applications/RustDesk.app rustdesk.dmg
+          echo "✅ Cleanup done"
