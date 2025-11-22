@@ -33,11 +33,19 @@ jobs:
           dbus-x11 \
           xrdp
 
-    - name: Install Google Chrome for CRD
+    - name: Add Google repository and install Chrome Remote Desktop
       run: |
-        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        sudo dpkg -i google-chrome-stable_current_amd64.deb
-        sudo apt --fix-broken install -y
+        # Install dependencies for adding Google repository
+        sudo apt install -y wget curl lsb-release gnupg
+
+        # Add Google’s APT repository
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        echo "deb [signed-by=/usr/share/keyrings/google-archive-keyring.gpg] https://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+
+        # Update and install Google Chrome and Chrome Remote Desktop
+        sudo apt update
+        sudo apt install -y google-chrome-stable
+        sudo apt install -y chrome-remote-desktop
 
     - name: Set up Chrome Remote Desktop
       run: |
@@ -46,22 +54,17 @@ jobs:
         echo "crduser:password" | sudo chpasswd
         
         # Configure Chrome Remote Desktop
-        sudo apt install -y chrome-remote-desktop
+        sudo apt install -y xfce4-session
+        sudo apt install -y xrdp
+        sudo systemctl enable xrdp
         
         # Set up XFCE session for CRD
         sudo echo "xfce4-session" > /home/crduser/.xsession
         sudo chown crduser:crduser /home/crduser/.xsession
         
-        # Add the user to the sudoers list (optional, depending on setup)
-        sudo usermod -aG sudo crduser
-        
         # Enable and start xrdp
-        sudo systemctl enable xrdp
-        sudo systemctl start xrdp
-        
-        # Setup Google Chrome
-        sudo apt install -y google-chrome-stable
-        
+        sudo systemctl restart xrdp
+
     - name: CRD Authentication Code (Manual Step)
       run: |
         echo "Now, follow these steps to authenticate with Chrome Remote Desktop:"
