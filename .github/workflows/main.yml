@@ -1,110 +1,140 @@
-name: macOS Intel – Getscreen.me Screen Share (One-Time Link, Nov 2025)
+name: macOS Intel - Getscreen.me Runner
 
 on:
   workflow_dispatch:
     inputs:
-      device_name:
-        description: "Session name for easy identification"
+      getscreen_email:
+        description: 'Your Getscreen.me Account Email (for registration)'
         required: true
-        type: string
-        default: "GitHub-macOS-Share-Session"
+      device_name:
+        description: 'Remote Device Name (e.g., Mac-Cloud-Runner)'
+        required: true
+        default: 'Mac-Cloud-Runner'
 
 jobs:
-  remote-share:
+  run-mac-remote-desktop:
     runs-on: macos-13
-    timeout-minutes: 360  # 6 hours
+
+    timeout-minutes: 360 # 6 hours maximum run time
 
     steps:
-      - name: Checkout repository (includes manual agent ZIP)
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🔍 Validate Environment & Agent File
+      - name: ⬇️ Download Getscreen.me Agent
+        shell: bash
         run: |
-          echo "macOS: $(sw_vers -productVersion) ($(uname -m))"
-          if [ ! -f "getscreen-macos.zip" ]; then
-            echo "::error::Missing getscreen-macos.zip! Download from https://my.getscreen.me > Add Device > macOS, then commit to repo."
+          # Download the macOS Agent application bundle with macOS-specific User-Agent to get the correct ZIP
+          GETSCREEN_URL="https://getscreen.me/download/macos-agent"
+
+          echo "Attempting to download agent from: $GETSCREEN_URL"
+          curl -fL -o getscreen.zip \
+            --user-agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15" \
+            $GETSCREEN_URL
+
+          # Check file size (should be ~10-20 MB for valid ZIP)
+          FILE_SIZE=$(stat -f%z getscreen.zip 2>/dev/null || stat -c%s getscreen.zip)
+          echo "Downloaded file size: ${FILE_SIZE} bytes"
+          if [ "${FILE_SIZE}" -lt 1000000 ]; then
+            echo "::error::Download failed - file too small (likely wrong file type). Check URL or User-Agent."
+            head -n 20 getscreen.zip  # Debug: show first lines if HTML
             exit 1
           fi
-          echo "✅ Agent ZIP found. Size: $(stat -f%z getscreen-macos.zip 2>/dev/null || stat -c%s getscreen-macos.zip) bytes"
 
-      - name: 📦 Extract & Install Agent
-        run: |
-          unzip -q getscreen-macos.zip
-          # Handle common extraction names
-          if [ -d "Getscreen.app" ]; then
-            mv Getscreen.app /Applications/
-            AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
-          elif [ -d "Getscreen Agent.app" ]; then
-            mv "Getscreen Agent.app" /Applications/Getscreen.app
-            AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen Agent"
-          else
-            echo "::error::No .app found after unzip. Contents:"
+          # Verify it's a ZIP
+          if ! file getscreen.zip | grep -q "Zip archive"; then
+            echo "::error::Downloaded file is not a ZIP (possibly Linux binary). File type:"
+            file getscreen.zip
+            exit 1
+          fi
+
+          echo "Download successful. Unzipping agent..."
+          unzip -q getscreen.zip || {
+            echo "::error::Unzip failed. Archive may be corrupted."
+            unzip -t getscreen.zip
+            exit 1
+          }
+
+          # Verify extraction
+          if [ ! -d "Getscreen.app" ]; then
+            echo "::error::No Getscreen.app found after unzip. Directory contents:"
             ls -la
             exit 1
           fi
-          echo "✅ Installed to $AGENT_PATH"
 
-      - name: 🚀 Launch Agent in Screen Share Mode & Generate Link
+          echo "✅ Agent extracted successfully."
+
+      - name: ⚙️ Configure and Register Getscreen.me Agent
+        shell: bash
+        env:
+          MY_EMAIL: ${{ inputs.getscreen_email }}
+          MY_NAME: ${{ inputs.device_name }}
         run: |
-          # Launch and set name
-          "$AGENT_PATH" -config "name='${{ inputs.device_name }}'" &
-          sleep 10  # Init time
+          mv Getscreen.app /Applications/
+          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
 
-          # Start screen share (one-time mode - generates link)
-          echo "Starting screen share session..."
-          # Agent typically prints the share link to stdout or log file
-          "$AGENT_PATH" -share > share_link.txt 2>&1 || {
-            # Fallback: Use general start and manual link note
-            "$AGENT_PATH" -start &
-            echo "Share link generated (check agent output): https://getscreen.me/share/[unique-id]"
-          }
-          
-          # Extract link from output if available
-          if [ -f share_link.txt ]; then
-            LINK=$(grep -o 'https://getscreen\.me/share/[^[:space:]]*' share_link.txt || echo "https://getscreen.me/share/manual-connect")
+          # Install daemon for persistence (optional for ephemeral, but ensures it runs)
+          "$AGENT_PATH" -install
+
+          # Register with email
+          "$AGENT_PATH" -register "$MY_EMAIL"
+
+          # Configure name and features
+          "$AGENT_PATH" -config "name='$MY_NAME' control=true fast_access=true file_transfer=true audio_calls=true lock_input=true disable_confirmation=true"
+
+          echo "✅ Getscreen.me registered and configured."
+
+      - name: 🚀 Launch Getscreen.me and Keep Runner Alive
+        shell: bash
+        run: |
+          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
+
+          # Start the service
+          "$AGENT_PATH" -start &
+
+          # Wait for startup
+          sleep 10
+
+          # Verify running
+          if pgrep -f "Getscreen" > /dev/null; then
+            echo "✅ Agent is running (PID: $(pgrep -f Getscreen))"
           else
-            LINK="https://getscreen.me/share/${{ inputs.device_name }}-${{ github.run_id }}"
+            echo "::error::Failed to start Getscreen.me agent."
+            exit 1
           fi
-          
-          echo "=================================================================="
-          echo "🎥 SCREEN SHARE LINK GENERATED! CONNECT NOW:"
-          echo ""
-          echo "📎 Direct Link: $LINK"
-          echo "📧 Or via Dashboard: Log in at https://my.getscreen.me > Use 'Quick Support' > Enter link/code"
-          echo "💻 Device/Session: ${{ inputs.device_name }}"
-          echo ""
-          echo "👉 Recipient opens link in browser (no install needed). Grant permissions on first connect."
-          echo "   Workflow Logs: ${{ github.server_url }}${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "=================================================================="
 
-      - name: 🛡️ Open macOS Permissions (For Remote Approval)
-        run: |
-          # Prompt for required perms (approve via share session)
-          open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-          open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-          echo "✅ Opened System Settings for Screen Recording & Accessibility. Approve during connection!"
-          sleep 5
+          echo "----------------------------------------------------------------"
+          echo "🎉 GETSCREEN.ME AGENT IS RUNNING. CONNECT NOW!"
+          echo "1. Go to your Getscreen.me dashboard: https://my.getscreen.me/"
+          echo "2. Find the device named '${{ inputs.device_name }}'."
+          echo "3. Initiate the remote connection."
+          echo "⚠️ Runner will terminate after 6 hours or manual cancel."
+          echo "----------------------------------------------------------------"
 
-      - name: ⏳ Keep Session Alive (6 Hours Max)
-        run: |
-          echo "Session live... Monitoring for 6 hours."
+          # Monitor and keep alive for 6 hours
           MINUTES=0
           while [ $MINUTES -lt 360 ]; do
             sleep 60
             MINUTES=$((MINUTES + 1))
             if [ $((MINUTES % 30)) -eq 0 ]; then
-              echo "✅ Active: ${MINUTES} min ($(date)). Agent running: $(pgrep -f Getscreen | wc -l | xargs)"
-              # Restart if crashed
-              if ! pgrep -f Getscreen > /dev/null; then
-                /Applications/Getscreen.app/Contents/MacOS/Getscreen -start &
-              fi
+              echo "⏰ Still active: ${MINUTES} minutes elapsed ($(date))"
+            fi
+            # Check if agent is still running
+            if ! pgrep -f "Getscreen" > /dev/null; then
+              echo "::warning::Agent stopped - restarting..."
+              "$AGENT_PATH" -start &
+              sleep 5
             fi
           done
-          echo "Timeout reached. Ending session."
+
+          echo "⏰ 6-hour limit reached. Terminating..."
 
       - name: 🧹 Cleanup on Failure
         if: failure()
+        shell: bash
         run: |
-          pkill -f Getscreen || true
-          rm -rf /Applications/Getscreen.app getscreen-macos.zip share_link.txt || true
-          echo "Cleanup complete."
+          echo "Cleaning up..."
+          /Applications/Getscreen.app/Contents/MacOS/Getscreen -stop 2>/dev/null || true
+          /Applications/Getscreen.app/Contents/MacOS/Getscreen -uninstall 2>/dev/null || true
+          rm -rf /Applications/Getscreen.app getscreen.zip
+          echo "✅ Cleanup done."
