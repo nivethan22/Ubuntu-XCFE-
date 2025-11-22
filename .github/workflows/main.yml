@@ -1,87 +1,126 @@
-name: macOS Intel - Getscreen.me Runner
+name: macOS Intel – Getscreen.me Remote Desktop
 
 on:
   workflow_dispatch:
     inputs:
       getscreen_email:
-        description: 'Your Getscreen.me Account Email (for registration)'
+        description: "Your Getscreen.me account email (for agent registration)"
         required: true
+        type: string
       device_name:
-        description: 'Remote Device Name (e.g., Mac-Cloud-Runner)'
+        description: "Name that will appear in your Getscreen.me dashboard"
         required: true
-        default: 'Mac-Cloud-Runner'
-    
+        type: string
+        default: "GitHub-macOS-Intel-Runner"
+
 jobs:
-  run-mac-remote-desktop:
-    # Use macos-13 for a recent Intel-based Mac runner. 
-    # NOTE: macos-latest is now M-series (Apple Silicon).
+  remote-desktop:
+    name: Start Getscreen.me on macOS Intel
     runs-on: macos-13
-    
-    timeout-minutes: 360 # 6 hours maximum run time
+    timeout-minutes: 360
 
     steps:
+      # ------------------------------------------------------------------
+      # 1. Checkout (optional – only if you need files from the repo)
+      # ------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- SETUP: GETSCREEN.ME INSTALLATION ---
-      
-      - name: ⬇️ Download Getscreen.me Agent
-        shell: bash
+      # ------------------------------------------------------------------
+      # 2. Download the latest Getscreen.me macOS agent (2025 working URL)
+      # ------------------------------------------------------------------
+      - name: Download Getscreen.me Agent
         run: |
-          # Download the macOS Agent application bundle
-          GETSCREEN_URL="https://getscreen.me/download/macos-agent"
-          
-          echo "Attempting to download agent from: $GETSCREEN_URL"
-          # Added -f (fail silently on server errors) and -L (follow redirects) 
-          # to ensure the download link works correctly.
-          curl -fL -o getscreen.zip $GETSCREEN_URL
-          
-          # Check if the download was successful before attempting to unzip
-          if [ ! -s getscreen.zip ]; then
-            echo "::error::Download failed. 'getscreen.zip' is missing or empty."
+          # Official direct download link as of 2025
+          URL="https://getscreen.me/download/agent/macos"
+
+          echo "Downloading Getscreen.me agent from: $URL"
+          curl -fL --retry 5 --retry-delay 10 -o getscreen.dmg "$URL"
+
+          # Safety checks
+          if [ ! -f getscreen.dmg ]; then
+            echo "::error::Download failed – file not created"
             exit 1
           fi
-          
-          echo "Download successful. Unzipping agent..."
-          unzip getscreen.zip
-          
-      - name: ⚙️ Configure and Register Getscreen.me Agent
-        shell: bash
+
+          SIZE=$(stat -f%z getscreen.dmg 2>/dev/null || stat -c%s getscreen.dmg)
+          echo "Downloaded file size: $SIZE bytes"
+          if [ "$SIZE" -lt 5000000 ]; then  # < 5 MB → probably HTML error page
+            echo "::error::File too small – likely an HTML error page instead of DMG"
+            head -n 30 getscreen.dmg
+            exit 1
+          fi
+
+          echo "Download successful!"
+
+      # ------------------------------------------------------------------
+      # 3. Mount DMG & copy Getscreen.app to /Applications
+      # ------------------------------------------------------------------
+      - name: Mount DMG and Install Getscreen.app
+        run: |
+          hdiutil attach getscreen.dmg -mountpoint /Volumes/Getscreen
+          cp -R "/Volumes/Getscreen/Getscreen Agent.app" /Applications/Getscreen.app || \
+          cp -R "/Volumes/Getscreen/Getscreen.app" /Applications/Getscreen.app
+          hdiutil detach /Volumes/Getscreen
+          echo "Getscreen.app installed to /Applications/"
+
+      # ------------------------------------------------------------------
+      # 4. Register & configure the agent
+      # ------------------------------------------------------------------
+      - name: Register & Configure Getscreen.me Agent
         env:
-          MY_EMAIL: ${{ github.event.inputs.getscreen_email }}
-          MY_NAME: ${{ github.event.inputs.device_name }}
+          EMAIL: ${{ inputs.getscreen_email }}
+          NAME: ${{ inputs.device_name }}
         run: |
-          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
-          
-          # Move the unzipped application to the standard Applications directory
-          mv Getscreen.app /Applications/
-          
-          # 1. Register the agent with the user's email
-          # 2. Configure the device name and enable control/file transfer
-          $AGENT_PATH -register $MY_EMAIL
-          $AGENT_PATH -config "name='$MY_NAME' control=true fast_access=true file_transfer=true"
-          
-          echo "Getscreen.me registered and configured."
+          AGENT="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
 
-      # --- FINAL STEP: LAUNCH AND KEEP ALIVE ---
-      
-      - name: 🚀 Launch Getscreen.me and Keep Runner Alive
-        shell: bash
+          echo "Registering agent with email: $EMAIL"
+          "$AGENT" -register "$EMAIL"
+
+          echo "Setting device name to: $NAME"
+          "$AGENT" -config "name='$NAME' control=true fast_access=true file_transfer=true autostart=true"
+
+          echo "Registration & configuration complete"
+
+      # ------------------------------------------------------------------
+      # 5. Verify agent is running
+      # ------------------------------------------------------------------
+      - name: Verify Agent is Running
         run: |
-          AGENT_PATH="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
-          
-          # Launch the agent service in the background
-          $AGENT_PATH -start &
-          
-          echo "----------------------------------------------------------------"
-          echo "🎉 GETSCREEN.ME AGENT IS RUNNING. CONNECT NOW!"
-          echo "1. Go to your Getscreen.me dashboard: https://my.getscreen.me/"
-          echo "2. Find the device named '${{ github.event.inputs.device_name }}' (or similar)."
-          echo "3. Initiate the remote connection."
-          echo "----------------------------------------------------------------"
+          AGENT="/Applications/Getscreen.app/Contents/MacOS/Getscreen"
+          sleep 8
+          "$AGENT" -start &
+          sleep 5
 
-          # Keep the runner alive for the duration of the timeout
-          # We use a simple loop, as closing the shell kills the process.
-          while true; do
+          if pgrep -x "Getscreen" > /dev/null; then
+            echo "Getscreen.me agent is running!"
+          else
+            echo "::error::Agent failed to start"
+            exit 1
+          fi
+
+      # ------------------------------------------------------------------
+      # 6. Final success message + keep-alive loop (6 hours max)
+      # ------------------------------------------------------------------
+      - name: Launch Success Message & Keep Runner Alive
+        run: |
+          echo "================================================================================================="
+          echo "GETSCREEN.ME AGENT IS NOW ONLINE AND READY!"
+          echo ""
+          echo "Email      : ${{ inputs.getscreen_email }}"
+          echo "Device name: ${{ inputs.device_name }}"
+          echo "Dashboard  : https://my.getscreen.me"
+          echo ""
+          echo "Connect from your browser NOW – the runner will auto-terminate after 6 hours."
+          echo "================================================================================================="
+
+          # Keep the job alive for the full 6 hours
+          echo "Keeping runner alive (max 6 hours)..."
+          MINUTES=0
+          while [ $MINUTES -lt 360 ]; do
             sleep 60
+            MINUTES=$((MINUTES + 1))
+            [ $((MINUTES % 30)) -eq 0 ] && echo "Still alive – $MINUTES minutes elapsed"
           done
+
+          echo "6-hour limit reached. Runner shutting down."
