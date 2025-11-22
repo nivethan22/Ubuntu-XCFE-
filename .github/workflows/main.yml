@@ -1,4 +1,4 @@
-name: Setup XFCE with Chrome Remote Desktop
+name: Setup XFCE with GetScreenMe Remote Access
 
 on:
   push:
@@ -33,47 +33,31 @@ jobs:
           dbus-x11 \
           xrdp
 
-    - name: Add Google repository and install Chrome Remote Desktop
+    - name: Install GetScreenMe for Remote Access
       run: |
-        # Install dependencies for adding Google repository
-        sudo apt install -y wget curl lsb-release gnupg
-        
-        # Add Google's GPG key to apt
-        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-archive-keyring.gpg
-        
-        # Add the Google repository to apt sources
-        echo "deb [signed-by=/usr/share/keyrings/google-archive-keyring.gpg] https://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-        
-        # Update and install Google Chrome and Chrome Remote Desktop
-        sudo apt update
-        sudo apt install -y google-chrome-stable
-        sudo apt install -y chrome-remote-desktop
+        # Install necessary dependencies
+        sudo apt install -y curl gnupg2
 
-    - name: Set up Chrome Remote Desktop
-      run: |
-        # Create user for CRD access
-        sudo useradd -m -s /bin/bash crduser
-        echo "crduser:password" | sudo chpasswd
-        
-        # Configure Chrome Remote Desktop
-        sudo apt install -y xfce4-session
-        sudo apt install -y xrdp
-        sudo systemctl enable xrdp
-        
-        # Set up XFCE session for CRD
-        sudo echo "xfce4-session" > /home/crduser/.xsession
-        sudo chown crduser:crduser /home/crduser/.xsession
-        
-        # Enable and start xrdp
-        sudo systemctl restart xrdp
+        # Download GetScreenMe installation script
+        curl -fsSL https://getscreen.me/getscreenme.sh | sudo bash
 
-    - name: CRD Authentication Code (Manual Step)
+        # Start GetScreenMe service
+        sudo systemctl enable getscreenme
+        sudo systemctl start getscreenme
+
+    - name: Set up XFCE session for GetScreenMe
       run: |
-        echo "Now, follow these steps to authenticate with Chrome Remote Desktop:"
-        echo "1. Open Chrome Remote Desktop on your Google Account."
-        echo "2. Use the code provided by Chrome Remote Desktop to authorize the session."
-        echo "3. After authorization, connect to your virtual machine via Chrome Remote Desktop."
+        # Set XFCE as the default desktop environment
+        echo "xfce4-session" > /home/runner/.xsession
+        sudo chown runner:runner /home/runner/.xsession
+
+    - name: GetScreenMe Authentication Code (Manual Step)
+      run: |
+        echo "Now, follow these steps to authenticate with GetScreenMe:"
+        echo "1. Open GetScreenMe in a browser."
+        echo "2. Use the generated code to authenticate your session."
+        echo "3. After authentication, connect to your VM via the browser using the code."
 
     - name: Final Message
       run: |
-        echo "Setup complete. Please connect manually using Chrome Remote Desktop. You will be prompted for your Google Account authorization code."
+        echo "Setup complete. You can now access your virtual machine via GetScreenMe."
