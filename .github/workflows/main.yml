@@ -1,0 +1,82 @@
+name: Ubuntu XFCE Desktop (CRD)
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      auth_code:
+        description: 'Google CRD Authorization Command (needed for initial pairing):'
+        required: true
+      pin:
+        description: 'CRD Pin (Default: 123456)'
+        required: false
+        default: '123456'
+
+jobs:
+  ubuntu_desktop_setup:
+    # Use the latest Ubuntu runner
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 1. ⬇️ Install Chrome Remote Desktop & XFCE Dependencies
+      # Use the default bash shell
+      shell: bash
+      run: |
+        echo "Installing core dependencies (CRD, XFCE, curl)..."
+        # Download and install CRD Debian package.
+        # The 'apt-get install -f' is crucial to pull in all missing dependencies.
+        wget https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
+        sudo dpkg -i chrome-remote-desktop_current_amd64.deb || sudo apt-get install -f -y
+
+        # Install the XFCE Desktop Environment, plus a terminal and utility
+        sudo apt-get install -y xfce4 xfce4-terminal lightdm
+
+        # Clean up the .deb file
+        rm chrome-remote-desktop_current_amd64.deb
+        echo "✅ Installation complete."
+
+    - name: 2. ⚙️ Configure CRD to use XFCE Desktop
+      shell: bash
+      run: |
+        echo "Setting XFCE as the default session for CRD."
+        # CRD looks for this file to know which desktop to load.
+        # We tell it to use the XFCE session manager.
+        echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > ~/.chrome-remote-desktop-session
+        echo "✅ Configuration successful."
+
+    - name: 3. 🚀 Start CRD Host and Keep Job Alive
+      shell: bash
+      env:
+        MY_PIN: ${{ inputs.pin }}
+        INPUT_CMD: ${{ inputs.auth_code }}
+      run: |
+        echo "Starting Chrome Remote Desktop Host..."
+
+        # Extract the necessary authorization code (the 4/...) from the input string
+        # This regex matches the required token format.
+        if [[ $INPUT_CMD =~ (4/[^[:space:]]+) ]]; then
+          CODE="${BASH_REMATCH[1]}"
+        else
+          echo "::error::CRD Auth Code not found in input. Ensure you provided the full PowerShell command."
+          exit 1
+        fi
+
+        # The path to the CRD host binary on Linux
+        CRD_BINARY="/opt/google/chrome-remote-desktop/start-host"
+
+        # Execute the CRD host startup command
+        # Note: Linux commands use single quotes for arguments
+        sudo $CRD_BINARY --code="$CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="Ubuntu-XFCE-Box" --pin="$MY_PIN"
+
+        echo "----------------------------------------------------------------"
+        echo "🎉 SETUP COMPLETE!"
+        echo "1. Go to https://remotedesktop.google.com/access"
+        echo "2. Find 'Ubuntu-XFCE-Box' and click to connect."
+        echo "3. Enter the PIN you provided (Default: 123456)."
+        echo "----------------------------------------------------------------"
+
+        # Loop indefinitely to prevent the job from exiting
+        echo "Keeping the runner alive..."
+        while true; do
+          sleep 60
+        done
