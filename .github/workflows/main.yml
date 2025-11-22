@@ -37,11 +37,13 @@ jobs:
       run: |
         # Install dependencies for adding Google repository
         sudo apt install -y wget curl lsb-release gnupg
-
-        # Add Google’s APT repository
-        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        
+        # Add Google's GPG key to apt
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-archive-keyring.gpg
+        
+        # Add the Google repository to apt sources
         echo "deb [signed-by=/usr/share/keyrings/google-archive-keyring.gpg] https://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-
+        
         # Update and install Google Chrome and Chrome Remote Desktop
         sudo apt update
         sudo apt install -y google-chrome-stable
