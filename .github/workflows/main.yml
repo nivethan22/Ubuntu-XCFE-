@@ -23,43 +23,52 @@ jobs:
           xfce4 \
           xfce4-goodies \
           xorg \
-          chrome-remote-desktop \
-          pulseaudio \
-          dbus-x11 \
           wget \
           curl \
           gnupg2 \
           lsb-release \
-          sudo
+          sudo \
+          xfce4-session \
+          pulseaudio \
+          dbus-x11 \
+          xrdp
 
-    - name: Set up Chrome Remote Desktop
+    - name: Install Google Chrome for CRD
       run: |
-        # Download and install the Google Chrome browser for CRD
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo dpkg -i google-chrome-stable_current_amd64.deb
         sudo apt --fix-broken install -y
-        
-        # Create user for CRD
+
+    - name: Set up Chrome Remote Desktop
+      run: |
+        # Create user for CRD access
         sudo useradd -m -s /bin/bash crduser
         echo "crduser:password" | sudo chpasswd
         
-        # Set up Chrome Remote Desktop
-        sudo apt install -y xfce4-session
-        sudo apt install -y xrdp
+        # Configure Chrome Remote Desktop
+        sudo apt install -y chrome-remote-desktop
+        
+        # Set up XFCE session for CRD
+        sudo echo "xfce4-session" > /home/crduser/.xsession
+        sudo chown crduser:crduser /home/crduser/.xsession
+        
+        # Add the user to the sudoers list (optional, depending on setup)
+        sudo usermod -aG sudo crduser
+        
+        # Enable and start xrdp
         sudo systemctl enable xrdp
+        sudo systemctl start xrdp
         
-        # Configure Google Chrome Remote Desktop
-        sudo mkdir -p /etc/opt/chrome_remote_desktop
-        echo "crduser" | sudo tee /etc/opt/chrome_remote_desktop/remote_desktop_user.txt
+        # Setup Google Chrome
+        sudo apt install -y google-chrome-stable
         
-        # Start Xfce desktop environment
-        echo "xfce4-session" > ~/.xsession
-        sudo systemctl restart xrdp
-
-    - name: Expose CRD via GitHub Actions (Not directly possible)
+    - name: CRD Authentication Code (Manual Step)
       run: |
-        echo "GitHub Actions cannot directly expose CRD over the web, but follow the instructions to connect to the desktop manually using the IP."
+        echo "Now, follow these steps to authenticate with Chrome Remote Desktop:"
+        echo "1. Open Chrome Remote Desktop on your Google Account."
+        echo "2. Use the code provided by Chrome Remote Desktop to authorize the session."
+        echo "3. After authorization, connect to your virtual machine via Chrome Remote Desktop."
 
-    - name: Notify for manual connection
+    - name: Final Message
       run: |
-        echo "You can now manually connect to the desktop environment via Chrome Remote Desktop using the credentials set above."
+        echo "Setup complete. Please connect manually using Chrome Remote Desktop. You will be prompted for your Google Account authorization code."
