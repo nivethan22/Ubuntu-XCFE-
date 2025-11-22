@@ -1,4 +1,4 @@
-name: Setup XFCE with GetScreenMe Remote Access
+name: Setup XFCE with VNC Remote Access
 
 on:
   push:
@@ -31,33 +31,34 @@ jobs:
           xfce4-session \
           pulseaudio \
           dbus-x11 \
-          xrdp
+          xrdp \
+          tightvncserver  # Install VNC server
 
-    - name: Install GetScreenMe for Remote Access
+    - name: Set up VNC Server with XFCE
       run: |
-        # Install necessary dependencies
-        sudo apt install -y curl gnupg2
+        # Create a password for the VNC server
+        mkdir -p /home/runner/.vnc
+        echo "yourpassword" | vncpasswd -f > /home/runner/.vnc/passwd
+        chmod 600 /home/runner/.vnc/passwd
+        
+        # Start the VNC server
+        vncserver :1 -geometry 1280x1024 -depth 24
+        
+        # Set up XFCE session for VNC
+        echo "xfce4-session" > /home/runner/.vnc/xstartup
+        chmod +x /home/runner/.vnc/xstartup
 
-        # Download GetScreenMe installation script
-        curl -fsSL https://getscreen.me/getscreenme.sh | sudo bash
+        # Restart VNC server to load the new session
+        vncserver -kill :1
+        vncserver :1 -geometry 1280x1024 -depth 24
 
-        # Start GetScreenMe service
-        sudo systemctl enable getscreenme
-        sudo systemctl start getscreenme
-
-    - name: Set up XFCE session for GetScreenMe
+    - name: VNC Authentication (Manual Step)
       run: |
-        # Set XFCE as the default desktop environment
-        echo "xfce4-session" > /home/runner/.xsession
-        sudo chown runner:runner /home/runner/.xsession
-
-    - name: GetScreenMe Authentication Code (Manual Step)
-      run: |
-        echo "Now, follow these steps to authenticate with GetScreenMe:"
-        echo "1. Open GetScreenMe in a browser."
-        echo "2. Use the generated code to authenticate your session."
-        echo "3. After authentication, connect to your VM via the browser using the code."
-
+        echo "Now, follow these steps to authenticate with VNC:"
+        echo "1. Open a VNC client on your local machine."
+        echo "2. Connect to the following address: {runner_ip}:1"
+        echo "3. Use the password 'yourpassword' to authenticate."
+        
     - name: Final Message
       run: |
-        echo "Setup complete. You can now access your virtual machine via GetScreenMe."
+        echo "VNC setup complete. You can now access your VM via VNC using a VNC client."
