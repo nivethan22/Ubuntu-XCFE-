@@ -21,16 +21,19 @@ jobs:
     timeout-minutes: 360 # 6 hours, or your repository's max limit
 
     steps:
-    - name: 1. ⬇️ Install Core Dependencies (CRD & XFCE)
+    - name: 1. ⬇️ Install Core Dependencies (CRD, XFCE, Xorg)
       shell: bash
       run: |
-        echo "Installing core dependencies (CRD, XFCE, curl, wget, dbus)..."
+        echo "Installing core dependencies (CRD, XFCE, Xorg server, curl, wget, dbus)..."
+        
+        # Install XFCE Desktop, Xorg Server, and related tools
+        sudo apt-get update
+        sudo apt-get install -y xfce4 xfce4-terminal lightdm dbus-x11 xserver-xorg
+
         # Download and install CRD Debian package.
         wget https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
+        # Use dpkg and apt-get install -f to handle all dependencies
         sudo dpkg -i chrome-remote-desktop_current_amd64.deb || sudo apt-get install -f -y
-
-        # Install the XFCE Desktop Environment and lightdm display manager
-        sudo apt-get install -y xfce4 xfce4-terminal lightdm dbus-x11
 
         # Clean up the .deb file
         rm chrome-remote-desktop_current_amd64.deb
@@ -48,7 +51,6 @@ jobs:
         sudo apt-get install -y sunshine
 
         echo "✅ Sunshine installed."
-        echo "Note: The job will automatically set up the headless screen and start Sunshine in the next step."
 
     - name: 3. ⚙️ Configure XFCE/CRD and Start Services
       shell: bash
@@ -62,6 +64,9 @@ jobs:
         # Tell CRD to use the XFCE session manager.
         echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > ~/.chrome-remote-desktop-session
 
+        # Ensure the pin is set correctly for the current user
+        /opt/google/chrome-remote-desktop/pin-auth.py --set-pin=${{ inputs.pin }}
+
         # Extract the CRD authorization code (the 4/...) from the input string
         if [[ $INPUT_CMD =~ (4/[^[:space:]]+) ]]; then
           CODE="${BASH_REMATCH[1]}"
@@ -74,16 +79,11 @@ jobs:
         CRD_BINARY="/opt/google/chrome-remote-desktop/start-host"
 
         # Execute the CRD host startup command
-        sudo $CRD_BINARY --code="$CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="Linux-Streaming-Rig" --pin="$MY_PIN"
+        # This registers the host using the authorization code and sets the name.
+        sudo $CRD_BINARY --code="$CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="Linux-Streaming-Rig" --pin-file="/home/runner/.config/chrome-remote-desktop/pin-auth.json"
 
-        # --- B. Headless Display Fix (Xdummy) ---
-        # GitHub runners need a virtual display server to render the desktop.
-        # This configures Xorg to run a virtual screen (e.g., 1920x1080).
-        sudo cp /etc/X11/xorg.conf.d/20-intel.conf /etc/X11/xorg.conf
-
-        # --- C. Start Sunshine ---
+        # --- B. Start Sunshine ---
         # The service needs to run under the correct user to interact with the desktop session
-        # This command starts Sunshine in the background (using 'nohup')
         nohup sunshine > sunshine.log 2>&1 &
         SUNSHINE_PID=$!
         echo "Sunshine started with PID: $SUNSHINE_PID"
@@ -92,11 +92,7 @@ jobs:
         echo "🎉 SETUP COMPLETE!"
         echo "1. CRD Access: Go to https://remotedesktop.google.com/access"
         echo "   - Find 'Linux-Streaming-Rig' and connect using PIN: ${{ inputs.pin }}"
-        echo ""
-        echo "2. Moonlight Access (after CRD connection):"
-        echo "   - In Moonlight, enter the IP address of this GitHub Runner."
-        echo "   - The IP will be visible in the CRD session's terminal or web browser."
-        echo "   - The pairing PIN will be shown inside the CRD desktop session."
+        echo "2. Moonlight Access (via CRD): Pair using the PIN displayed on http://localhost:47990/ in the CRD session."
         echo "----------------------------------------------------------------"
 
         # Loop indefinitely to keep the job alive
