@@ -20,26 +20,18 @@ jobs:
     - name: 1. 🛠️ Setup Demo User & Install Basics
       shell: bash
       env:
-        # This is the system password you requested
         SYS_PASS: '12345678910Nive@' 
       run: |
         echo "Installing Desktop Environment..."
         sudo apt-get update
-        # Added xfce4-goodies for better stability and missing icons
-        sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal dbus-x11 xserver-xorg
+        # Install xfce4 and xfce4-goodies (essential for the panel/icons to load)
+        sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal dbus-x11 xserver-xorg x11-xserver-utils
 
         echo "Creating user 'Demo'..."
-        # Create user 'Demo' with a home directory
         sudo useradd -m -s /bin/bash Demo
-        
-        # Add 'Demo' to the sudo (admin) group
         sudo usermod -aG sudo Demo
-        
-        # Set the specific password for Demo
         echo "Demo:$SYS_PASS" | sudo chpasswd
-        
-        echo "✅ User 'Demo' created with Admin privileges."
-        echo "✅ Password set to: $SYS_PASS"
+        echo "✅ User 'Demo' created."
 
     - name: 2. 🌐 Install & Join ZeroTier
       shell: bash
@@ -51,12 +43,10 @@ jobs:
     - name: 3. ⬇️ Install CRD & Sunshine
       shell: bash
       run: |
-        # Install Chrome Remote Desktop
         wget https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
         sudo dpkg -i chrome-remote-desktop_current_amd64.deb || sudo apt-get install -f -y
         rm chrome-remote-desktop_current_amd64.deb
 
-        # Install Sunshine (Moonlight Host)
         ASSET_URL=$(curl -s https://api.github.com/repos/LizardByte/Sunshine/releases/latest | grep -oP '"browser_download_url": "\K[^"]+ubuntu-22.04-amd64.deb')
         wget -q "$ASSET_URL" -O sunshine.deb
         sudo apt-get install -y ./sunshine.deb
@@ -70,22 +60,34 @@ jobs:
       run: |
         echo "Configuring XFCE for Demo..."
         
-        # --- FIX START: Correctly configure the session file ---
-        # Unset DBUS to prevent 'failsafe session' errors
-        sudo -u Demo bash -c "echo 'unset DBUS_SESSION_BUS_ADDRESS' > /home/Demo/.chrome-remote-desktop-session"
-        # Explicitly set the desktop environment
-        sudo -u Demo bash -c "echo 'export XDG_CURRENT_DESKTOP=XFCE' >> /home/Demo/.chrome-remote-desktop-session"
-        # Launch the session manager directly
-        sudo -u Demo bash -c "echo 'exec /usr/bin/xfce4-session' >> /home/Demo/.chrome-remote-desktop-session"
-        # --- FIX END ---
+        # --- FIX: Improved Session Script ---
+        # 1. We create the file as root first to ensure correct content
+        # 2. We use startxfce4 (wrapper) instead of xfce4-session (binary)
+        # 3. We explicitly set XDG_CONFIG_DIRS so it finds the defaults
         
-        # Create the config directory for Demo
+        sudo bash -c "cat > /home/Demo/.chrome-remote-desktop-session <<EOF
+        #!/bin/sh
+        unset DBUS_SESSION_BUS_ADDRESS
+        unset XDG_RUNTIME_DIR
+        export XDG_CONFIG_DIRS=/etc/xdg
+        exec /usr/bin/startxfce4
+        EOF"
+
+        # Ensure the file is executable and owned by Demo
+        sudo chmod +x /home/Demo/.chrome-remote-desktop-session
+        sudo chown Demo:Demo /home/Demo/.chrome-remote-desktop-session
+
+        # Create config dir
         sudo -u Demo mkdir -p /home/Demo/.config/chrome-remote-desktop
         
-        # Create the PIN file for Demo
+        # Create PIN file
         echo "$PIN" | sudo -u Demo tee /home/Demo/.config/chrome-remote-desktop/pin-auth.json > /dev/null
 
-        # Extract the Auth Code
+        # --- FIX: Permission Sweep ---
+        # Ensure Demo owns their home dir recursively (fixes 'unable to create cache' errors)
+        sudo chown -R Demo:Demo /home/Demo/
+
+        # Extract Auth Code
         if [[ $INPUT_CMD =~ (4/[^[:space:]]+) ]]; then
           CODE="${BASH_REMATCH[1]}"
         else
@@ -95,8 +97,6 @@ jobs:
 
         echo "Starting CRD Host as 'Demo'..."
         
-        # We run the command as root (sudo), but tell it to start the session for user "Demo"
-        # We pipe the PIN twice to bypass the interactive prompts
         printf "$PIN\n$PIN\n" | sudo /opt/google/chrome-remote-desktop/start-host \
           --code="$CODE" \
           --redirect-url="https://remotedesktop.google.com/_/oauthredirect" \
@@ -104,18 +104,10 @@ jobs:
           --user-name="Demo" \
           --pin-file="/home/Demo/.config/chrome-remote-desktop/pin-auth.json"
 
-        # Start Sunshine as the 'Demo' user so it sees the correct desktop
         sudo -u Demo nohup sunshine > /home/Demo/sunshine.log 2>&1 &
 
         echo "----------------------------------------------------------------"
         echo "🎉 SETUP COMPLETE!"
-        echo "👤 Logged in User: Demo"
-        echo "🔑 System Password: 12345678910Nive@"
         echo "----------------------------------------------------------------"
-        echo "1. ZeroTier: Check the box on my.zerotier.com"
-        echo "2. CRD: Connect with PIN ${{ inputs.pin }}"
-        echo "3. Moonlight: Pair at https://localhost:47990/pin inside the VM"
-        echo "----------------------------------------------------------------"
-
-        # Keep alive
+        
         while true; do sleep 60; done
