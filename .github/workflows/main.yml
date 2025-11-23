@@ -1,4 +1,4 @@
-name: Streaming Rig (User: Demo | Admin)
+name: Streaming Rig
 
 on:
   workflow_dispatch:
