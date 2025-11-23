@@ -24,7 +24,7 @@ jobs:
       run: |
         echo "Installing Desktop Environment..."
         sudo apt-get update
-        # Install xfce4 and xfce4-goodies (essential for the panel/icons to load)
+        # Install XFCE, Goodies, and vital X11/DBus utilities
         sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal dbus-x11 xserver-xorg x11-xserver-utils
 
         echo "Creating user 'Demo'..."
@@ -60,31 +60,31 @@ jobs:
       run: |
         echo "Configuring XFCE for Demo..."
         
-        # --- FIX: Improved Session Script ---
-        # 1. We create the file as root first to ensure correct content
-        # 2. We use startxfce4 (wrapper) instead of xfce4-session (binary)
-        # 3. We explicitly set XDG_CONFIG_DIRS so it finds the defaults
+        # --- FIX START: FORCE DBUS LAUNCH ---
+        # The error "xfconfd isn't running" happens because there is no DBUS session.
+        # We wrap startxfce4 in dbus-launch to create one.
         
         sudo bash -c "cat > /home/Demo/.chrome-remote-desktop-session <<EOF
         #!/bin/sh
         unset DBUS_SESSION_BUS_ADDRESS
         unset XDG_RUNTIME_DIR
-        export XDG_CONFIG_DIRS=/etc/xdg
-        exec /usr/bin/startxfce4
+        # This is the magic line: Launch a dedicated DBus session for XFCE
+        exec /usr/bin/dbus-launch --exit-with-session /usr/bin/startxfce4
         EOF"
+        # --- FIX END ---
 
-        # Ensure the file is executable and owned by Demo
+        # Make executable and set ownership
         sudo chmod +x /home/Demo/.chrome-remote-desktop-session
         sudo chown Demo:Demo /home/Demo/.chrome-remote-desktop-session
 
-        # Create config dir
+        # Create config directories
         sudo -u Demo mkdir -p /home/Demo/.config/chrome-remote-desktop
+        sudo -u Demo mkdir -p /home/Demo/.config/xfce4
         
-        # Create PIN file
+        # Set the PIN
         echo "$PIN" | sudo -u Demo tee /home/Demo/.config/chrome-remote-desktop/pin-auth.json > /dev/null
 
-        # --- FIX: Permission Sweep ---
-        # Ensure Demo owns their home dir recursively (fixes 'unable to create cache' errors)
+        # Permission Sweep: Ensure Demo owns EVERYTHING in their home
         sudo chown -R Demo:Demo /home/Demo/
 
         # Extract Auth Code
@@ -104,6 +104,7 @@ jobs:
           --user-name="Demo" \
           --pin-file="/home/Demo/.config/chrome-remote-desktop/pin-auth.json"
 
+        # Start Sunshine
         sudo -u Demo nohup sunshine > /home/Demo/sunshine.log 2>&1 &
 
         echo "----------------------------------------------------------------"
