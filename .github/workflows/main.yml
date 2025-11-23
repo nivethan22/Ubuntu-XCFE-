@@ -1,129 +1,106 @@
-name: macOS Intel - RustDesk Remote Desktop Runner
+name: Debian/Ubuntu Streaming Rig (CRD + Moonlight)
 
 on:
+  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
     inputs:
-      device_password:
-        description: 'Permanent password for unattended access (choose a strong one)'
+      auth_code:
+        description: 'Google CRD Authorization Command (Windows format expected):'
         required: true
-        default: 'securepassword123'
+      pin:
+        description: 'CRD Pin (Default: 123456 - Max 6 digits)'
+        required: false
+        default: '123456'
 
 jobs:
-  run-mac-remote-desktop:
-    runs-on: macos-13
-    timeout-minutes: 360 # 6 hours max
+  streaming_desktop_setup:
+    # Use the latest Ubuntu runner (Debian derivative)
+    runs-on: ubuntu-latest
+    
+    # Increase the maximum job timeout to allow for longer streaming sessions
+    timeout-minutes: 360 # 6 hours, or your repository's max limit
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: 1. ⬇️ Install Core Dependencies (CRD & XFCE)
+      shell: bash
+      run: |
+        echo "Installing core dependencies (CRD, XFCE, curl, wget, dbus)..."
+        # Download and install CRD Debian package.
+        wget https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
+        sudo dpkg -i chrome-remote-desktop_current_amd64.deb || sudo apt-get install -f -y
 
-      - name: ⬇️ Download RustDesk (Latest macOS Intel DMG)
-        shell: bash
-        run: |
-          # Latest stable as of Nov 2025 - check https://github.com/rustdesk/rustdesk/releases for updates
-          RUSTDESK_URL="https://github.com/rustdesk/rustdesk/releases/download/1.4.4/rustdesk-1.4.4-x86_64.dmg"
-          echo "Downloading from: $RUSTDESK_URL"
-          curl -fL -o rustdesk.dmg "$RUSTDESK_URL"
-          if [ ! -s rustdesk.dmg ]; then
-            echo "::error::Download failed"
-            exit 1
-          fi
-          echo "✅ Downloaded"
+        # Install the XFCE Desktop Environment and lightdm display manager
+        sudo apt-get install -y xfce4 xfce4-terminal lightdm dbus-x11
 
-      - name: 📦 Install RustDesk from DMG
-        shell: bash
-        run: |
-          hdiutil attach rustdesk.dmg -mountpoint /Volumes/RustDesk
-          cp -R /Volumes/RustDesk/RustDesk.app /Applications/
-          hdiutil detach /Volumes/RustDesk
-          echo "✅ Installed to /Applications"
+        # Clean up the .deb file
+        rm chrome-remote-desktop_current_amd64.deb
+        echo "✅ CRD & XFCE Installation complete."
 
-      - name: ⚙️ Configure Config File for Unattended Access
-        shell: bash
-        env:
-          PASSWORD: ${{ inputs.device_password }}
-        run: |
-          CONFIG_DIR="/Library/Preferences/com.carriez.RustDesk"
-          CONFIG_FILE="$CONFIG_DIR/RustDesk.toml"
-          
-          sudo mkdir -p "$CONFIG_DIR"
-          sudo touch "$CONFIG_FILE"
-          
-          # Set plain password (app hashes on start)
-          echo "password = '$PASSWORD'" | sudo tee -a "$CONFIG_FILE"
-          
-          echo "✅ Config file created at $CONFIG_FILE with password set"
+    - name: 2. 🎮 Install Sunshine (Moonlight Host)
+      shell: bash
+      run: |
+        echo "Adding Sunshine PPA and installing..."
+        # Add the Sunshine PPA (Personal Package Archive)
+        sudo add-apt-repository ppa:loki-dev/sunshine -y
+        # Update package lists
+        sudo apt-get update
+        # Install Sunshine
+        sudo apt-get install -y sunshine
 
-      - name: 🚀 Launch RustDesk and Verify (Hashes Password)
-        shell: bash
-        run: |
-          AGENT_PATH="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
-          
-          # Launch to apply config and hash password
-          "$AGENT_PATH" &
-          sleep 15
-          
-          # Restart to ensure config applies
-          pkill -f rustdesk || true
-          sleep 5
-          "$AGENT_PATH" &
-          sleep 10
-          
-          # Get ID
-          ID=$("$AGENT_PATH" --get-id)
-          echo "RustDesk ID: $ID"
-          
-          # Verify running
-          if pgrep -f "rustdesk" > /dev/null; then
-            echo "✅ Running (PID: $(pgrep -f rustdesk))"
-          else
-            echo "::error::Failed to start"
-            exit 1
-          fi
+        echo "✅ Sunshine installed."
+        echo "Note: The job will automatically set up the headless screen and start Sunshine in the next step."
 
-      - name: 🛡️ Open Permissions Settings (Approve on Connect)
-        shell: bash
-        run: |
-          open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-          open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-          echo "✅ Permissions opened - approve remotely on first connect"
+    - name: 3. ⚙️ Configure XFCE/CRD and Start Services
+      shell: bash
+      env:
+        MY_PIN: ${{ inputs.pin }}
+        INPUT_CMD: ${{ inputs.auth_code }}
+      run: |
+        echo "Configuring desktop session and starting CRD/Sunshine..."
 
-      - name: 🎉 Connect Now & Keep Alive
-        shell: bash
-        env:
-          PASSWORD: ${{ inputs.device_password }}
-        run: |
-          AGENT_PATH="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
-          ID=$("$AGENT_PATH" --get-id)
-          
-          echo "----------------------------------------------------------------"
-          echo "RustDesk running! Connect now:"
-          echo "1. Download client: https://rustdesk.com/"
-          echo "2. ID: $ID"
-          echo "3. Password: $PASSWORD"
-          echo "4. Connect and approve permissions."
-          echo "⚠️ Active for 6 hours."
-          echo "----------------------------------------------------------------"
-          
-          MINUTES=0
-          while [ $MINUTES -lt 360 ]; do
-            sleep 60
-            MINUTES=$((MINUTES + 1))
-            if [ $((MINUTES % 30)) -eq 0 ]; then
-              echo "⏰ Active: ${MINUTES} minutes ($(date))"
-              if ! pgrep -f "rustdesk" > /dev/null; then
-                echo "::warning::Stopped - restarting"
-                "$AGENT_PATH" &
-                sleep 5
-              fi
-            fi
-          done
-          echo "⏰ Timeout"
+        # --- A. CRD Configuration ---
+        # Tell CRD to use the XFCE session manager.
+        echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > ~/.chrome-remote-desktop-session
 
-      - name: 🧹 Cleanup on Failure
-        if: failure()
-        shell: bash
-        run: |
-          pkill -f rustdesk || true
-          rm -rf /Applications/RustDesk.app rustdesk.dmg
-          echo "✅ Cleanup done"
+        # Extract the CRD authorization code (the 4/...) from the input string
+        if [[ $INPUT_CMD =~ (4/[^[:space:]]+) ]]; then
+          CODE="${BASH_REMATCH[1]}"
+        else
+          echo "::error::CRD Auth Code not found in input. Ensure you provided the full PowerShell command."
+          exit 1
+        fi
+
+        # The path to the CRD host binary on Linux
+        CRD_BINARY="/opt/google/chrome-remote-desktop/start-host"
+
+        # Execute the CRD host startup command
+        sudo $CRD_BINARY --code="$CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="Linux-Streaming-Rig" --pin="$MY_PIN"
+
+        # --- B. Headless Display Fix (Xdummy) ---
+        # GitHub runners need a virtual display server to render the desktop.
+        # This configures Xorg to run a virtual screen (e.g., 1920x1080).
+        sudo cp /etc/X11/xorg.conf.d/20-intel.conf /etc/X11/xorg.conf
+
+        # --- C. Start Sunshine ---
+        # The service needs to run under the correct user to interact with the desktop session
+        # This command starts Sunshine in the background (using 'nohup')
+        nohup sunshine > sunshine.log 2>&1 &
+        SUNSHINE_PID=$!
+        echo "Sunshine started with PID: $SUNSHINE_PID"
+
+        echo "----------------------------------------------------------------"
+        echo "🎉 SETUP COMPLETE!"
+        echo "1. CRD Access: Go to https://remotedesktop.google.com/access"
+        echo "   - Find 'Linux-Streaming-Rig' and connect using PIN: ${{ inputs.pin }}"
+        echo ""
+        echo "2. Moonlight Access (after CRD connection):"
+        echo "   - In Moonlight, enter the IP address of this GitHub Runner."
+        echo "   - The IP will be visible in the CRD session's terminal or web browser."
+        echo "   - The pairing PIN will be shown inside the CRD desktop session."
+        echo "----------------------------------------------------------------"
+
+        # Loop indefinitely to keep the job alive
+        echo "Keeping the runner alive for streaming..."
+        while true; do
+          sleep 60
+        done
