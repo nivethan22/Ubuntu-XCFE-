@@ -17,7 +17,7 @@ jobs:
     # Use the latest Ubuntu runner
     runs-on: ubuntu-latest
     
-    # Increase timeout
+    # Increase timeout to max allowed
     timeout-minutes: 360
 
     steps:
@@ -65,10 +65,8 @@ jobs:
         # Create config directory
         mkdir -p ~/.config/chrome-remote-desktop
         
-        # --- FIX IS HERE ---
-        # Manually write the PIN to the json file (since pin-auth.py was removed by Google)
+        # Create the PIN file manually (since pin-auth.py is missing in newer versions)
         echo "${{ inputs.pin }}" > /home/runner/.config/chrome-remote-desktop/pin-auth.json
-        # -------------------
 
         # Extract CRD Auth Code
         if [[ $INPUT_CMD =~ (4/[^[:space:]]+) ]]; then
@@ -81,7 +79,8 @@ jobs:
         CRD_BINARY="/opt/google/chrome-remote-desktop/start-host"
 
         # Start CRD Host
-        sudo $CRD_BINARY --code="$CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="Linux-Streaming-Rig" --pin-file="/home/runner/.config/chrome-remote-desktop/pin-auth.json"
+        # Added --user-name="runner" to fix the "missing args" error
+        sudo $CRD_BINARY --code="$CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="Linux-Streaming-Rig" --pin-file="/home/runner/.config/chrome-remote-desktop/pin-auth.json" --user-name="runner"
 
         # --- B. Start Sunshine ---
         nohup sunshine > sunshine.log 2>&1 &
