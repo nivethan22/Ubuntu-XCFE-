@@ -42,14 +42,21 @@ jobs:
     - name: 2. 🎮 Install Sunshine (Moonlight Host)
       shell: bash
       run: |
-        echo "Adding Sunshine PPA and installing..."
-        # Add the Sunshine PPA (Personal Package Archive)
-        sudo add-apt-repository ppa:loki-dev/sunshine -y
-        # Update package lists
+        echo "Downloading latest Sunshine release from LizardByte..."
+        
+        # Fetch the latest release URL specifically for Ubuntu 22.04 (compatible with current ubuntu-latest)
+        # This greps the GitHub API for the asset URL ending in ubuntu-22.04-amd64.deb
+        ASSET_URL=$(curl -s https://api.github.com/repos/LizardByte/Sunshine/releases/latest | grep -oP '"browser_download_url": "\K[^"]+ubuntu-22.04-amd64.deb')
+        
+        echo "Downloading asset: $ASSET_URL"
+        wget -q "$ASSET_URL" -O sunshine.deb
+        
+        # Install the package using apt to resolve dependencies automatically
         sudo apt-get update
-        # Install Sunshine
-        sudo apt-get install -y sunshine
-
+        sudo apt-get install -y ./sunshine.deb
+        
+        # Cleanup
+        rm sunshine.deb
         echo "✅ Sunshine installed."
 
     - name: 3. ⚙️ Configure XFCE/CRD and Start Services
@@ -65,6 +72,8 @@ jobs:
         echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > ~/.chrome-remote-desktop-session
 
         # Ensure the pin is set correctly for the current user
+        # We create the directory first to ensure pin-auth doesn't fail
+        mkdir -p ~/.config/chrome-remote-desktop
         /opt/google/chrome-remote-desktop/pin-auth.py --set-pin=${{ inputs.pin }}
 
         # Extract the CRD authorization code (the 4/...) from the input string
@@ -92,7 +101,7 @@ jobs:
         echo "🎉 SETUP COMPLETE!"
         echo "1. CRD Access: Go to https://remotedesktop.google.com/access"
         echo "   - Find 'Linux-Streaming-Rig' and connect using PIN: ${{ inputs.pin }}"
-        echo "2. Moonlight Access (via CRD): Pair using the PIN displayed on http://localhost:47990/ in the CRD session."
+        echo "2. Moonlight Access (via CRD): Pair using the PIN displayed on https://localhost:47990/ in the CRD session."
         echo "----------------------------------------------------------------"
 
         # Loop indefinitely to keep the job alive
