@@ -25,7 +25,8 @@ jobs:
       run: |
         echo "Installing Desktop Environment..."
         sudo apt-get update
-        sudo apt-get install -y xfce4 xfce4-terminal dbus-x11 xserver-xorg
+        # Added xfce4-goodies for better stability and missing icons
+        sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal dbus-x11 xserver-xorg
 
         echo "Creating user 'Demo'..."
         # Create user 'Demo' with a home directory
@@ -69,8 +70,14 @@ jobs:
       run: |
         echo "Configuring XFCE for Demo..."
         
-        # Create the session file inside Demo's home folder
-        sudo -u Demo bash -c "echo 'exec /etc/X11/Xsession /usr/bin/xfce4-session' > /home/Demo/.chrome-remote-desktop-session"
+        # --- FIX START: Correctly configure the session file ---
+        # Unset DBUS to prevent 'failsafe session' errors
+        sudo -u Demo bash -c "echo 'unset DBUS_SESSION_BUS_ADDRESS' > /home/Demo/.chrome-remote-desktop-session"
+        # Explicitly set the desktop environment
+        sudo -u Demo bash -c "echo 'export XDG_CURRENT_DESKTOP=XFCE' >> /home/Demo/.chrome-remote-desktop-session"
+        # Launch the session manager directly
+        sudo -u Demo bash -c "echo 'exec /usr/bin/xfce4-session' >> /home/Demo/.chrome-remote-desktop-session"
+        # --- FIX END ---
         
         # Create the config directory for Demo
         sudo -u Demo mkdir -p /home/Demo/.config/chrome-remote-desktop
