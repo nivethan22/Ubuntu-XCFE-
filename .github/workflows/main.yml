@@ -17,21 +17,27 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: 1. 🛠️ Setup Demo User & Install Basics
+    - name: 1. 🛠️ Install Desktop Environment
       shell: bash
       env:
+        # We will set this password for the CURRENT user
         SYS_PASS: '12345678910Nive@' 
       run: |
-        echo "Installing Desktop Environment..."
+        echo "Installing XFCE..."
         sudo apt-get update
-        # Install XFCE, Goodies, and vital X11/DBus utilities
         sudo apt-get install -y xfce4 xfce4-goodies xfce4-terminal dbus-x11 xserver-xorg x11-xserver-utils
+        
+        # Remove light-locker (screensaver) as it often crashes headless sessions
+        sudo apt-get remove -y light-locker || true
 
-        echo "Creating user 'Demo'..."
-        sudo useradd -m -s /bin/bash Demo
-        sudo usermod -aG sudo Demo
-        echo "Demo:$SYS_PASS" | sudo chpasswd
-        echo "✅ User 'Demo' created."
+        echo "Setting password for default user..."
+        # Set password for the current GitHub user (usually 'runner')
+        echo "$(whoami):$SYS_PASS" | sudo chpasswd
+        
+        # Add current user to sudo group just in case
+        sudo usermod -aG sudo $(whoami)
+        
+        echo "✅ Password set for user: $(whoami)"
 
     - name: 2. 🌐 Install & Join ZeroTier
       shell: bash
@@ -52,40 +58,30 @@ jobs:
         sudo apt-get install -y ./sunshine.deb
         rm sunshine.deb
 
-    - name: 4. ⚙️ Configure Session for 'Demo'
+    - name: 4. ⚙️ Configure Session
       shell: bash
       env:
         PIN: ${{ inputs.pin }}
         INPUT_CMD: ${{ inputs.auth_code }}
       run: |
-        echo "Configuring XFCE for Demo..."
+        echo "Configuring XFCE for $(whoami)..."
         
-        # --- FIX START: FORCE DBUS LAUNCH ---
-        # The error "xfconfd isn't running" happens because there is no DBUS session.
-        # We wrap startxfce4 in dbus-launch to create one.
-        
-        sudo bash -c "cat > /home/Demo/.chrome-remote-desktop-session <<EOF
+        # Configure session for the CURRENT user
+        # We still use dbus-launch because GHA is headless
+        cat > ~/.chrome-remote-desktop-session <<EOF
         #!/bin/sh
         unset DBUS_SESSION_BUS_ADDRESS
         unset XDG_RUNTIME_DIR
-        # This is the magic line: Launch a dedicated DBus session for XFCE
         exec /usr/bin/dbus-launch --exit-with-session /usr/bin/startxfce4
-        EOF"
-        # --- FIX END ---
+        EOF
 
-        # Make executable and set ownership
-        sudo chmod +x /home/Demo/.chrome-remote-desktop-session
-        sudo chown Demo:Demo /home/Demo/.chrome-remote-desktop-session
+        chmod +x ~/.chrome-remote-desktop-session
 
-        # Create config directories
-        sudo -u Demo mkdir -p /home/Demo/.config/chrome-remote-desktop
-        sudo -u Demo mkdir -p /home/Demo/.config/xfce4
+        # Create config directory
+        mkdir -p ~/.config/chrome-remote-desktop
         
-        # Set the PIN
-        echo "$PIN" | sudo -u Demo tee /home/Demo/.config/chrome-remote-desktop/pin-auth.json > /dev/null
-
-        # Permission Sweep: Ensure Demo owns EVERYTHING in their home
-        sudo chown -R Demo:Demo /home/Demo/
+        # Create PIN file
+        echo "$PIN" | tee ~/.config/chrome-remote-desktop/pin-auth.json > /dev/null
 
         # Extract Auth Code
         if [[ $INPUT_CMD =~ (4/[^[:space:]]+) ]]; then
@@ -95,20 +91,23 @@ jobs:
           exit 1
         fi
 
-        echo "Starting CRD Host as 'Demo'..."
+        echo "Starting CRD Host..."
         
-        printf "$PIN\n$PIN\n" | sudo /opt/google/chrome-remote-desktop/start-host \
+        # Start CRD using the CURRENT user ($(whoami))
+        printf "$PIN\n$PIN\n" | /opt/google/chrome-remote-desktop/start-host \
           --code="$CODE" \
           --redirect-url="https://remotedesktop.google.com/_/oauthredirect" \
           --name="Linux-Streaming-Rig" \
-          --user-name="Demo" \
-          --pin-file="/home/Demo/.config/chrome-remote-desktop/pin-auth.json"
+          --user-name="$(whoami)" \
+          --pin-file="$HOME/.config/chrome-remote-desktop/pin-auth.json"
 
         # Start Sunshine
-        sudo -u Demo nohup sunshine > /home/Demo/sunshine.log 2>&1 &
+        nohup sunshine > sunshine.log 2>&1 &
 
         echo "----------------------------------------------------------------"
         echo "🎉 SETUP COMPLETE!"
+        echo "👤 User: $(whoami)"
+        echo "🔑 Password: 12345678910Nive@"
         echo "----------------------------------------------------------------"
         
         while true; do sleep 60; done
